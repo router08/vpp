@@ -1206,6 +1206,7 @@ vlib_worker_thread_node_refork (void)
   nm_clone->node_by_error = nm->node_by_error;
 }
 
+/* 当有新的节点添加时，需要通知worker线程进行重建运行环境 */
 void
 vlib_worker_thread_node_runtime_update (void)
 {

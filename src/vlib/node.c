@@ -118,6 +118,7 @@ vlib_node_rename (vlib_main_t * vm, u32 node_index, char *fmt, ...)
   vlib_worker_thread_node_rename (node_index);
 }
 
+/* 增加了节点，需要更新运行时数据，next_index不是节点索引，而是槽位号slot */
 static void
 vlib_node_runtime_update (vlib_main_t * vm, u32 node_index, u32 next_index)
 {
@@ -130,11 +131,13 @@ vlib_node_runtime_update (vlib_main_t * vm, u32 node_index, u32 next_index)
 
   node = vec_elt (nm->nodes, node_index);
   r = vlib_node_get_runtime (vm, node_index);
-
+  
+  /* 新增多少个下一跳节点 */
   n_insert = vec_len (node->next_nodes) - r->n_next_nodes;
   if (n_insert > 0)
     {
       i = r->next_frame_index + r->n_next_nodes;
+	  /* 在数组中间插入n_insert个节点 */
       vec_insert (nm->next_frames, n_insert, i);
 
       /* Initialize newly inserted next frames. */
@@ -149,7 +152,7 @@ vlib_node_runtime_update (vlib_main_t * vm, u32 node_index, u32 next_index)
 	    s->next_frame_index += n_insert;
 	}
 
-      /* Pending frames may need to be relocated also. */
+      /* Pending frames may need to be relocated also.  修改正在运行的帧的索引*/
       vec_foreach (pf, nm->pending_frames)
       {
 	if (pf->next_frame_index != VLIB_PENDING_FRAME_NO_NEXT_FRAME
@@ -166,7 +169,7 @@ vlib_node_runtime_update (vlib_main_t * vm, u32 node_index, u32 next_index)
       r->n_next_nodes = vec_len (node->next_nodes);
     }
 
-  /* Set frame's node runtime index. */
+  /* Set frame's node runtime index.  设置节点的运行时索引，next_index是槽位号，不是索引 */
   next_node = vlib_get_node (vm, node->next_nodes[next_index]);
   nf = nm->next_frames + r->next_frame_index + next_index;
   nf->node_runtime_index = next_node->runtime_index;
@@ -212,17 +215,19 @@ vlib_node_add_next_with_slot (vlib_main_t * vm,
 
   /* Runtime has to be initialized. */
   ASSERT (nm->flags & VLIB_NODE_MAIN_RUNTIME_STARTED);
-
+  
+  /* 根据下一跳节点索引快速判断该节点是否在本节点的下一跳数组中 */
   if ((p = hash_get (node->next_slot_by_node, next_node_index)))
     {
-      /* Next already exists: slot must match. */
+      /* Next already exists: slot must match.  已经存在，返回该slot */
       if (slot != ~0)
 	ASSERT (slot == p[0]);
       return p[0];
     }
 
   vlib_worker_thread_barrier_sync (vm);
-
+  
+  /* 不存在的话，将下一个可用位置分给该next_node_index节点 */
   if (slot == ~0)
     slot = vec_len (node->next_nodes);
 
@@ -236,16 +241,22 @@ vlib_node_add_next_with_slot (vlib_main_t * vm,
       old_next->prev_node_bitmap =
 	clib_bitmap_andnoti (old_next->prev_node_bitmap, node_index);
     }
-
+  
+  /* 添加一个下一跳索引 */
   node->next_nodes[slot] = next_node_index;
   hash_set (node->next_slot_by_node, next_node_index, slot);
-
+  
+  /* 构建运行信息 */
   vlib_node_runtime_update (vm, node_index, slot);
-
+  
+  /* 建立反向关系，设置next_node_index节点的位数组prev_node_bitmap中node_index为1 */
   next->prev_node_bitmap = clib_bitmap_ori (next->prev_node_bitmap,
 					    node_index);
 
   /* Siblings all get same node structure. */
+  /* 处理本节点的兄弟节点，兄弟节点都指向该next_node_index节点 
+   * 存在深度的递归调用该函数。最差情况下，一个兄弟节点递归一次。
+   */
   {
     uword sib_node_index, sib_slot;
     vlib_node_t *sib_node;
@@ -266,6 +277,8 @@ vlib_node_add_next_with_slot (vlib_main_t * vm,
 }
 
 /* Add named next node to given node in given slot. */
+/* 添加一个命名的下一跳到节点node指定的slot中，如果slot没有指定，则分配。
+ */
 uword
 vlib_node_add_named_next_with_slot (vlib_main_t * vm,
 				    uword node, char *name, uword slot)
@@ -536,7 +549,7 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
   }
 }
 
-/* Register new packet processing node. */
+/* Register new packet processing node. 动态注册一个新节点 */
 u32
 vlib_register_node (vlib_main_t * vm, vlib_node_registration_t * r)
 {
