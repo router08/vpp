@@ -2058,7 +2058,7 @@ vlib_main (vlib_main_t * volatile vm, unformat_input_t * input)
       goto done;
     }
 
-  /* Register static nodes so that init functions may use them. */
+  /* Register static nodes so that init functions may use them.  注册所有静态节点*/
   vlib_register_all_static_nodes (vm);
 
   /* Set seed for random number generator.
@@ -2067,7 +2067,7 @@ vlib_main (vlib_main_t * volatile vm, unformat_input_t * input)
     vm->random_seed = clib_cpu_time_now ();
   clib_random_buffer_init (&vm->random_buffer, vm->random_seed);
 
-  /* Initialize node graph. */
+  /* Initialize node graph.  初始化节点图*/
   if ((error = vlib_node_main_init (vm)))
     {
       /* Arrange for graph hook up error to not be fatal when debugging. */

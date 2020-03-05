@@ -317,6 +317,12 @@ node_elog_init (vlib_main_t * vm, uword ni)
 #define STACK_ALIGN CLIB_CACHE_LINE_BYTES
 #endif
 
+/*
+  register_node函数分配一个vlib_node_t结构，
+  用vlib_node_registration_t信息对其进行初始化
+  最后将其添加到vm->node_main->nodes指针数组中
+  其在数组中的下标为n->index
+*/
 static void
 register_node (vlib_main_t * vm, vlib_node_registration_t * r)
 {
@@ -340,7 +346,8 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
       /* to avoid confusion, please remove ".function " statiement from
          CLIB_NODE_REGISTRATION() if using function function candidates */
       ASSERT (r->function == 0);
-
+	  
+	  /* 从节点的多个函数中选择一个最高的优先级的函数作为节点的最终处理函数 */
       while (fnr)
 	{
 	  if (fnr->priority > priority)
@@ -353,13 +360,16 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
     }
 
   ASSERT (r->function != 0);
-
+  
+  /* 分配节点内存 */
   n = clib_mem_alloc_no_fail (sizeof (n[0]));
   clib_memset (n, 0, sizeof (n[0]));
+  /* 设置索引 */
   n->index = vec_len (nm->nodes);
   n->node_fn_registrations = r->node_fn_registrations;
   n->protocol_hint = r->protocol_hint;
 
+  /* 将节点地址添加到数组中 */
   vec_add1 (nm->nodes, n);
 
   /* Name is always a vector so it can be formatted with %v. */
@@ -367,7 +377,8 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
     n->name = vec_dup ((u8 *) r->name);
   else
     n->name = format (0, "%s", r->name);
-
+  
+  /* 构建节点名字与节点索引hash表 */
   if (!nm->node_by_name)
     nm->node_by_name = hash_create_vec ( /* size */ 32,
 					sizeof (n->name[0]), sizeof (uword));
@@ -416,6 +427,7 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
 	clib_memcpy (n->runtime_data, r->runtime_data, r->runtime_data_bytes);
     }
 
+  /* 初始化节点的下一级节点数组 */
   vec_resize (n->next_node_names, r->n_next_nodes);
   for (i = 0; i < r->n_next_nodes; i++)
     n->next_node_names[i] = r->next_nodes[i];
@@ -426,6 +438,7 @@ register_node (vlib_main_t * vm, vlib_node_registration_t * r)
   n->owner_node_index = n->owner_next_index = ~0;
 
   /* Initialize node runtime. */
+  /* 初始化节点运行数据，主要是对节点按类型进行分类 */
   {
     vlib_node_runtime_t *rt;
     u32 i;
@@ -553,6 +566,7 @@ vlib_register_all_static_nodes (vlib_main_t * vm)
     "blackholed packets",
   };
 
+  /* 定义一个null节点，作为第一个节点，其编号为0 */
   static vlib_node_registration_t null_node_reg = {
     .function = null_node_fn,
     .vector_size = sizeof (u32),
@@ -564,7 +578,8 @@ vlib_register_all_static_nodes (vlib_main_t * vm)
   /* make sure that node index 0 is not used by
      real node */
   register_node (vm, &null_node_reg);
-
+  
+  /* 遍历所有的静态节点，进行注册 */
   r = vm->node_main.node_registrations;
   while (r)
     {
@@ -643,13 +658,20 @@ vlib_node_main_init (vlib_main_t * vm)
   vlib_node_t *n;
   uword ni;
 
+  /* 创建frame内存分配器 */
   nm->frame_sizes = vec_new (vlib_frame_size_t, 1);
 #ifdef VLIB_SUPPORTS_ARBITRARY_SCALAR_SIZES
   nm->frame_size_hash = hash_create (0, sizeof (uword));
 #endif
+  /* 设置初始化完成标志 */
   nm->flags |= VLIB_NODE_MAIN_RUNTIME_STARTED;
 
   /* Generate sibling relationships */
+  /* 处理所有节点的兄弟关系
+   * 不同类型的输入节点大多是兄弟节点，他们会指向相同的下一跳节点。
+   * 例如dpdk-input节点与af-packet-input几点就是互为兄弟节点。
+   * 兄弟的兄弟也是我兄弟
+   */
   {
     vlib_node_t *n, *sib;
     uword si;
@@ -670,26 +692,27 @@ vlib_node_main_init (vlib_main_t * vm)
 	  }
 
         /* *INDENT-OFF* */
+	/* 遍历兄弟节点的每一个兄弟掩码 */
 	clib_bitmap_foreach (si, sib->sibling_bitmap, ({
 	      vlib_node_t * m = vec_elt (nm->nodes, si);
 
-	      /* Connect all of sibling's siblings to us. */
+	      /* Connect all of sibling's siblings to us. 将本节点加入到"兄弟的兄弟节点"的"兄弟掩码图"中 */
 	      m->sibling_bitmap = clib_bitmap_ori (m->sibling_bitmap, n->index);
 
-	      /* Connect us to all of sibling's siblings. */
+	      /* Connect us to all of sibling's siblings. 将"该兄弟的兄弟节点"加入到本节点的"兄弟掩码图"中  */
 	      n->sibling_bitmap = clib_bitmap_ori (n->sibling_bitmap, si);
 	    }));
         /* *INDENT-ON* */
 
-	/* Connect sibling to us. */
+	/* Connect sibling to us. 将本节点加入到兄弟节点的"兄弟掩码图"中 */
 	sib->sibling_bitmap = clib_bitmap_ori (sib->sibling_bitmap, n->index);
 
-	/* Connect us to sibling. */
+	/* Connect us to sibling.  将兄弟节点加入到本节点的"兄弟掩码图"中 */
 	n->sibling_bitmap = clib_bitmap_ori (n->sibling_bitmap, sib->index);
       }
   }
 
-  /* Resolve next names into next indices. */
+  /* Resolve next names into next indices.  根据下一跳名字数组构建下一跳掩码数组*/
   for (ni = 0; ni < vec_len (nm->nodes); ni++)
     {
       uword i;
@@ -702,7 +725,8 @@ vlib_node_main_init (vlib_main_t * vm)
 
 	  if (!a)
 	    continue;
-
+	  
+     	/* 构建下一跳的索引数组 */
 	  if (~0 == vlib_node_add_named_next_with_slot (vm, n->index, a, i))
 	    {
 	      error = clib_error_create
@@ -714,7 +738,7 @@ vlib_node_main_init (vlib_main_t * vm)
       vec_free (n->next_node_names);
     }
 
-  /* Set previous node pointers. */
+  /* Set previous node pointers.  将下一跳节点指向自己，构建前驱关系*/
   for (ni = 0; ni < vec_len (nm->nodes); ni++)
     {
       vlib_node_t *n_next;
@@ -733,6 +757,7 @@ vlib_node_main_init (vlib_main_t * vm)
 	}
     }
 
+  /* 初始化每一个内部节点，构建下一跳节点的运行信息 */
   {
     vlib_next_frame_t *nf;
     vlib_node_runtime_t *r;
@@ -744,9 +769,10 @@ vlib_node_main_init (vlib_main_t * vm)
       if (r->n_next_nodes == 0)
 	continue;
 
+	/* 根据运行索引获取其在next_frames的起始地址 */
       n = vlib_get_node (vm, r->node_index);
       nf = vec_elt_at_index (nm->next_frames, r->next_frame_index);
-
+	/* 遍历每一个下一跳 */
       for (i = 0; i < vec_len (n->next_nodes); i++)
 	{
 	  next = vlib_get_node (vm, n->next_nodes[i]);

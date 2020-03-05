@@ -108,13 +108,13 @@ typedef struct _vlib_node_registration
   /* Name of sibling (if applicable). */
   char *sibling_of;
 
-  /* Node index filled in by registration. */
+  /* Node index filled in by registration.  节点索引*/
   u32 index;
 
   /* Type of this node. */
   vlib_node_type_t type;
 
-  /* Error strings indexed by error code for this node. */
+  /* Error strings indexed by error code for this node.  节点错误码映射表*/
   char **error_strings;
 
   /* Buffer format/unformat for this node. */
@@ -130,7 +130,7 @@ typedef struct _vlib_node_registration
 			 struct vlib_node_runtime_t *,
 			 struct vlib_frame_t * f);
 
-  /* Per-node runtime data. */
+  /* Per-node runtime data.  节点运行时数据，私有数据存储位置*/
   void *runtime_data;
 
   /* Process stack size. */
@@ -154,13 +154,13 @@ typedef struct _vlib_node_registration
   /* Number of error codes used by this node. */
   u16 n_errors;
 
-  /* Number of next node names that follow. */
+  /* Number of next node names that follow.  该节点指向的下一级节点个数 */
   u16 n_next_nodes;
 
-  /* Constructor link-list, don't ask... */
+  /* Constructor link-list, don't ask...  所有节点通过该成员形成链表 */
   struct _vlib_node_registration *next_registration;
 
-  /* Names of next nodes which this node feeds into. */
+  /* Names of next nodes which this node feeds into.  下一级节点数组，存储的是名字 */
   char *next_nodes[];
 
 } vlib_node_registration_t;
