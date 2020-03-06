@@ -52,8 +52,11 @@ vec_resize_allocate_memory (void *v,
   void *old, *new;
   void *oldheap;
 
+  /* 获取vec头部大小，这里的header_bytes传进来的时候是私有头部的大小，
+   * 需要加上sizeof (vec_header_t), 并对齐为2的指数次方
+   */
   header_bytes = vec_header_bytes (header_bytes);
-
+  /* 更新内存总的长度 */
   data_bytes += header_bytes;
 
   if (PREDICT_FALSE (numa_id != VEC_NUMA_UNSPECIFIED))
@@ -62,6 +65,7 @@ vec_resize_allocate_memory (void *v,
       clib_mem_set_per_cpu_heap (clib_mem_get_per_numa_heap (numa_id));
     }
 
+  /* 如果v是空的，则申请内存new，并把v设置为new + header_bytes，即用户数据开始位置 */
   if (!v)
     {
       new = clib_mem_alloc_aligned_at_offset (data_bytes, data_align, header_bytes, 1	/* yes, call os_out_of_memory */
@@ -71,22 +75,26 @@ vec_resize_allocate_memory (void *v,
       clib_memset (new, 0, new_alloc_bytes);
       CLIB_MEM_POISON (new + data_bytes, new_alloc_bytes - data_bytes);
       v = new + header_bytes;
+	  /* 保存vec元素的数量到_vec_len (v) */
       _vec_len (v) = length_increment;
       _vec_numa (v) = numa_id;
       if (PREDICT_FALSE (numa_id != VEC_NUMA_UNSPECIFIED))
 	clib_mem_set_per_cpu_heap (oldheap);
       return v;
     }
-
+  /* 如果v不为空，表示已经存在，需要在原有内存的基础上考虑是否增加 */
   vh->len += length_increment;
+  /* 旧的vec头部指针 */
   old = v - header_bytes;
 
   /* Vector header must start heap object. */
+  /* 判断旧的vec头部地址在合理的范围内 */
   ASSERT (clib_mem_is_heap_object (old));
-
+  /* 获取旧的vec总的内存大小 */
   old_alloc_bytes = clib_mem_size (old);
 
   /* Need to resize? */
+  /* 如果旧的vec总的内存够用，则直接返回v即可，不需要申请新的内存 */
   if (data_bytes <= old_alloc_bytes)
     {
       CLIB_MEM_UNPOISON (v, data_bytes);
@@ -94,7 +102,10 @@ vec_resize_allocate_memory (void *v,
 	clib_mem_set_per_cpu_heap (oldheap);
       return v;
     }
-
+  /* 如果新的内存的大小大于旧的内存的3/2的话，
+   * 则直接按照新的内存大小申请内存，
+   * 否则按照旧的内存的3/2大小申请内存 
+   */
 #if CLIB_VECTOR_GROW_BY_ONE > 0
   new_alloc_bytes = data_bytes;
 #else
@@ -103,6 +114,7 @@ vec_resize_allocate_memory (void *v,
     new_alloc_bytes = data_bytes;
 #endif
 
+  /* 申请新的new后拷贝old的数据到new，在返回v + header_bytes给用户 */
   new =
     clib_mem_alloc_aligned_at_offset (new_alloc_bytes, data_align,
 				      header_bytes,

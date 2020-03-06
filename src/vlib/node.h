@@ -318,6 +318,7 @@ typedef struct vlib_node_t
   u16 n_errors;
 
   /* Size of scalar and vector arguments in bytes. */
+  /* 这两个成员组合成key，在vlib_node_main_t->frame_size_hash中查找，确定本node相关的frame的内存池 */
   u16 scalar_size, vector_size;
 
   /* Handle/index in error heap for this node. */
@@ -332,6 +333,7 @@ typedef struct vlib_node_t
   char **next_node_names;
 
   /* Next node indices for this node. */
+  /* 根据next_node_names来生成next_nodes/vec结构，记录了每个可选下一跳的index */
   u32 *next_nodes;
 
   /* Name of node that we are sibling of. */
@@ -341,6 +343,7 @@ typedef struct vlib_node_t
   uword *sibling_bitmap;
 
   /* Total number of vectors sent to each next node. */
+  /* 统计发给下一跳node的数据包总数 */
   u64 *n_vectors_by_next_node;
 
   /* Hash table mapping next node index into slot in
@@ -490,6 +493,7 @@ typedef struct vlib_node_runtime_t
   u32 perf_counter1_ticks_since_last_overflow; /**< Perf counter 1 ticks */
   u32 perf_counter_vectors_since_last_overflow;	/**< Perf counter vectors */
 
+  /* 本node的多个下一跳中，第一个下一跳在vlib_node_main_t->next_frames中的索引 */
   u32 next_frame_index;			/**< Start of next frames for this
 					  node. */
 
@@ -695,17 +699,27 @@ vlib_timing_wheel_data_get_index (u32 d)
 
 typedef struct
 {
-  /* Public nodes. */
+  /* Public nodes.  */
+  /* 一块连续内存，头部是vec_header_t，数据部分是node指针数组，使用下标作为索引 */
   vlib_node_t **nodes;
 
-  /* Node index hashed by node name. */
+  /* Node index hashed by node name.  */
+  /* 根据节点名字和节点索引进行hash
+   * 根据节点名字进行hash表查找 
+   * 只有main线程才会处理该hash表*/
   uword *node_by_name;
 
-  u32 flags;
+    /* 该标志表示Runtime信息已经被初始化过了,目前只有VLIB_NODE_MAIN_RUNTIME_STARTED一个状态，暂时没啥用，忽略之 */
+  u32 flags;  
 #define VLIB_NODE_MAIN_RUNTIME_STARTED (1 << 0)
 
   /* Nodes segregated by type for cache locality.
      Does not apply to nodes of type VLIB_NODE_TYPE_INTERNAL. */
+  /* node有4种类型:
+  		VLIB_NODE_TYPE_INTERNAL,
+  		VLIB_NODE_TYPE_INPUT,
+  		VLIB_NODE_TYPE_PRE_INPUT,
+  		VLIB_NODE_TYPE_PROCESS, 按类型分类索引*/
   vlib_node_runtime_t *nodes_by_type[VLIB_N_NODE_TYPE];
 
   /* Node runtime indices for input nodes with pending interrupts. */
@@ -714,14 +728,29 @@ typedef struct
 
   /* Input nodes are switched from/to interrupt to/from polling mode
      when average vector length goes above/below polling/interrupt
-     thresholds. */
+     thresholds. 
+   * 输入节点在中断模式和轮询模式之间进行切换，当向量的平均长度高于轮询长度阈值时
+   * 将会从中断模式切换到轮询模式(这种情况说明报文非常多)，当长度低于中断阈值时，从
+   * 轮询模式切换到中断模式(压力变小了)
+   */
   u32 polling_threshold_vector_length;
   u32 interrupt_threshold_vector_length;
 
   /* Vector of next frames. */
+   /* 帧数组，由INTERNAL节点组成,
+    * 其中n1是该节点的下一跳节点的个数，元素是节点运行索引
+    * node_runtime_index与帧数据索引构成的帧。
+	* |----node 1的n1个元素|----node 2的n2个元素|......| ----node n的n个元素| 
+    * 只针对INTERNAL节点 
+    * 假设node1有n1个下一跳，node2有n2个下一跳....
+    * 共n1 + n2 +....+ni个下一跳连续保存在next_frames指向的vec中。*/
   vlib_next_frame_t *next_frames;
 
   /* Vector of internal node's frames waiting to be called. */
+  /* 等待被调用的INTERNAL节点, 
+   * 数据包从node输出到下一跳，那么下一跳node即是pending frame，会加入pending_frames指向的vec
+   * 主循环会遍历该vec，对每个node来调用处理逻辑
+    */
   vlib_pending_frame_t *pending_frames;
 
   /* Timing wheel for scheduling time-based node dispatch. */
@@ -737,12 +766,17 @@ typedef struct
 
   /* Vector of process nodes.
      One for each node of type VLIB_NODE_TYPE_PROCESS. */
+  /* VLIB_NODE_TYPE_PROCESS类型的node，每个node都有分配在heap上的运行栈，
+   * processes保存所有VLIB_NODE_TYPE_PROCESS类型node的描述结构指针。
+   */
   vlib_process_t **processes;
 
   /* Current running process or ~0 if no process running. */
+  /* VLIB_NODE_TYPE_PROCESS类型的node执行时都会把current_process_index赋值为本node的runtime_index */
   u32 current_process_index;
 
   /* Pool of pending process frames. */
+  /* VLIB_NODE_TYPE_PROCESS类型node专用，挂起时在其中保存信息 */
   vlib_pending_frame_t *suspended_process_frames;
 
   /* Vector of event data vectors pending recycle. */
@@ -752,15 +786,18 @@ typedef struct
   u32 input_node_counts_by_state[VLIB_N_NODE_STATE];
 
   /* Hash of (scalar_size,vector_size) to frame_sizes index. */
+  /* hash表，把node的scalar_size，vector_size值组合成key，查找对应的vlib_frame_size_t结构 */
   uword *frame_size_hash;
 
   /* Per-size frame allocation information. */
+  /* 不同大小的帧的分配信息，是一个数组，与上面的hash表是两种索引方式 */
   vlib_frame_size_t *frame_sizes;
 
   /* Time of last node runtime stats clear. */
   f64 time_last_runtime_stats_clear;
 
   /* Node registrations added by constructors */
+  /** 注册node函数提交的注册信息链接在这里，仅仅初始化时使用 */
   vlib_node_registration_t *node_registrations;
 
   /* Node index from error code */

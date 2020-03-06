@@ -679,16 +679,22 @@ vlib_process_wait_for_event_or_clock (vlib_main_t * vm, f64 dt)
 
   p = vec_elt (nm->processes, nm->current_process_index);
 
+  /* 事件处理
+   * 1. process 协程剩余suspend时间如果小于10us,则可以resume
+   * 2. process协程的整个"非空事件索引位图"中有某个事件，则可以resume
+   * 3. 以上2个条件均不满足，则继续suspend
+   */
   if (vlib_process_suspend_time_is_zero (dt)
       || !clib_bitmap_is_zero (p->non_empty_event_type_bitmap))
     return dt;
 
+  /* 定时器处理 */
   wakeup_time = vlib_time_now (vm) + dt;
 
   /* Suspend waiting for both clock and event to occur. */
   p->flags |= (VLIB_PROCESS_IS_SUSPENDED_WAITING_FOR_EVENT
 	       | VLIB_PROCESS_IS_SUSPENDED_WAITING_FOR_CLOCK);
-
+  /* 这段代码逻辑不清楚 ??? */
   r = clib_setjmp (&p->resume_longjmp, VLIB_PROCESS_RESUME_LONGJMP_SUSPEND);
   if (r == VLIB_PROCESS_RESUME_LONGJMP_SUSPEND)
     {
