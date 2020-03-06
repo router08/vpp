@@ -694,7 +694,7 @@ vlib_unix_main (int argc, char *argv[])
       return 1;
     }
   unformat_free (&input);
-
+  /*加载plugin */
   i = vlib_plugin_early_init (vm);
   if (i)
     return i;
@@ -702,6 +702,7 @@ vlib_unix_main (int argc, char *argv[])
   unformat_init_command_line (&input, (char **) vm->argv);
   if (vm->init_functions_called == 0)
     vm->init_functions_called = hash_create (0, /* value bytes */ 0);
+  /* 调用命令行中指定的所有初始化函数 */
   e = vlib_call_all_config_functions (vm, &input, 1 /* early */ );
   if (e != 0)
     {
@@ -711,14 +712,18 @@ vlib_unix_main (int argc, char *argv[])
   unformat_free (&input);
 
   /* always load symbols, for signal handler and mheap memory get/put backtrace */
+  /* 加载符号，主要用于debug调试 */
   clib_elf_main_init (vm->name);
 
   vec_validate (vlib_thread_stacks, 0);
+  /* 创建主线程的线程栈
+   * 线程栈数据以数组形式保存，线程栈地址可直接通过偏移量获取
+   */
   vlib_thread_stack_init (0);
 
   __os_thread_index = 0;
   vm->thread_index = 0;
-
+  /* 调用主线程的回调函数 */
   i = clib_calljmp (thread0, (uword) vm,
 		    (void *) (vlib_thread_stacks[0] +
 			      VLIB_THREAD_STACK_SIZE));

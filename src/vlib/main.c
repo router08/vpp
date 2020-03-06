@@ -1730,10 +1730,14 @@ vlib_main_or_worker_loop (vlib_main_t * vm, int is_main)
        * at this point in time.
        */
       vlib_worker_thread_initial_barrier_sync_and_release (vm);
-
+	   /* 执行所有VLIB_NODE_TYPE_PROCESS类型node，
+	    * 利用setjump/longjump机制，把node挂起来，等待之后唤醒。
+	    * 可以理解为一种多任务模型。
+	    * 该种类型node主要是用于"运行时配置"相关
+	    */
       nm->current_process_index = ~0;
       for (i = 0; i < vec_len (nm->processes); i++)
-	cpu_time_now = dispatch_process (vm, nm->processes[i], /* frame */ 0,
+	    cpu_time_now = dispatch_process (vm, nm->processes[i], /* frame */ 0,
 					 cpu_time_now);
     }
 
@@ -1793,7 +1797,7 @@ vlib_main_or_worker_loop (vlib_main_t * vm, int is_main)
       if (PREDICT_TRUE (is_main && vm->queue_signal_pending == 0))
 	vm->queue_signal_callback (vm);
 
-      /* Next handle interrupts. */
+      /* Next handle interrupts.  dpdk没有中断机制，这里不会执行 */
       {
 	/* unlocked read, for performance */
 	uword l = _vec_len (nm->pending_interrupt_node_runtime_indices);

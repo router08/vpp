@@ -86,9 +86,11 @@ vpe_main_init (vlib_main_t * vm)
   /*
    * Create the binary api plugin hashes before loading plugins
    */
+   /* vat 是vpp提供的API Test模块，用于API测试 */
   vat_plugin_hash_create ();
 
   if (!vlib_plugin_path)
+  	/* 根据vpp执行/proc/self/exe 确定plugin和vat的路径 */
     vpp_find_plugin_path ();
 }
 
@@ -287,6 +289,7 @@ defaulted:
       clib_mem_set_per_numa_heap (main_heap);
 
       vm->init_functions_called = hash_create (0, /* value bytes */ 0);
+	  /* vpp plugin 初始化 */
       vpe_main_init (vm);
       return vlib_unix_main (argc, argv);
     }

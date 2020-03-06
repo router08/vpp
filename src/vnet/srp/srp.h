@@ -48,6 +48,7 @@
 extern vnet_hw_interface_class_t srp_hw_interface_class;
 
 /* See RFC 2892. */
+/* SRP, Spatial Reuse Protocol, 空间复用协议 */
 #define foreach_srp_ips_state			\
   _ (idle)					\
   _ (pass_thru)					\

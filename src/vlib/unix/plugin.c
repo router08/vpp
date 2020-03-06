@@ -350,8 +350,8 @@ vlib_load_new_plugins (plugin_main_t * pm, int from_early_init)
 	    {
 	      int j;
 	      for (j = 0; j < vec_len (pm->plugin_name_filter); j++)
-		if (entry->d_name[j] != pm->plugin_name_filter[j])
-		  goto next;
+		    if (entry->d_name[j] != pm->plugin_name_filter[j]) // FIXME: 文件名和过滤名数组应进行二维循环比对
+		      goto next;
 	    }
 
 	  filename = format (0, "%s/%s%c", plugin_path[i], entry->d_name, 0);
@@ -632,7 +632,7 @@ vlib_plugin_config (vlib_main_t * vm, unformat_input_t * input)
   unformat_input_t in;
 
   unformat_init (&in, 0, 0);
-
+	/* 格式化命令行参数，将结果存储在in中 */
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       u8 *s, *v;
@@ -641,7 +641,7 @@ vlib_plugin_config (vlib_main_t * vm, unformat_input_t * input)
 	  if (strncmp ((const char *) s, "plugins", 8) == 0)
 	    {
 	      if (vec_len (in.buffer) > 0)
-		vec_add1 (in.buffer, ' ');
+		    vec_add1 (in.buffer, ' ');
 	      vec_add (in.buffer, v, vec_len (v));
 	    }
 	}
@@ -656,7 +656,7 @@ vlib_plugin_config (vlib_main_t * vm, unformat_input_t * input)
       vec_free (s);
     }
 done:
-  input = &in;
+  input = &in; // 根据in中的关键字解析
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       unformat_input_t sub_input;
@@ -679,6 +679,7 @@ done:
       else if (unformat (input, "plugin %s %U", &s,
 			 unformat_vlib_cli_sub_input, &sub_input))
 	{
+	    /* 将解析出的插件属性(enable/disbale/skip version check)等信息存在plugin_main_t->configs中*/
 	  error = config_one_plugin (vm, (char *) s, &sub_input);
 	  unformat_free (&sub_input);
 	  if (error)
